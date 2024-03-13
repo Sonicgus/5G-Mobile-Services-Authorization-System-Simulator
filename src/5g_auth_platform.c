@@ -6,12 +6,20 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
 
 // #define DEBUG //remove this line to remove debug messages
 #define LOG_FILENAME "log.txt"
+#define USER_PIPE "/tmp/USER_PIPE"
+#define BACK_PIPE "/tmp/BACK_PIPE"
 
-FILE *log_fp;
-pid_t system_manager_pid, authorization_request_manager_pid, monitor_engine_pid;
+// Struct to store the shared memory
+typedef struct
+{
+    pthread_mutex_t mutex_log;
+    pthread_mutex_t mutex_shm;
+} Shared_Memory;
 
 // Struct to store the configuration
 typedef struct
@@ -19,10 +27,36 @@ typedef struct
     int QUEUE_POS, AUTH_SERVERS_MAX, AUTH_PROC_TIME, MAX_VIDEO_WAIT, MAX_OTHERS_WAIT;
 } Config;
 
+typedef struct
+{
+    int type; //-1 - vazia / 0 - comando / 1 - dados de other / 2 - dados de video
+    char string[2048];
+} Task;
+
+typedef struct node
+{
+    Task task;
+    struct node *next;
+} Node;
+
+pid_t *servers_pid;
 Config config;
+int shmid;
+Shared_Memory *shm;
+FILE *log_fp;
+pthread_mutexattr_t mutex_attr;
+pid_t system_manager_pid, authorization_request_manager_pid, monitor_engine_pid;
+
+pthread_mutex_t mutex_video_queue;
+pthread_mutex_t mutex_others_queue;
+
+Node *video_queue;
+Node *others_queue;
 
 void print_log(const char *string)
 {
+    pthread_mutex_lock(&shm->mutex_log);
+
     time_t t;
     struct tm *tm_ptr;
     // get the time
@@ -54,6 +88,8 @@ void print_log(const char *string)
         perror("fflush");
         exit(1);
     }
+
+    pthread_mutex_unlock(&shm->mutex_log);
 }
 
 void read_config_file(const char *config_file)
@@ -106,6 +142,22 @@ void read_config_file(const char *config_file)
 
 void start(const char *config_file)
 {
+    // create shared memory
+    shmid = shmget(IPC_PRIVATE, sizeof(Shared_Memory), IPC_CREAT | 0666);
+    if (shmid == -1)
+    {
+        perror("Error: shmget error");
+        exit(1);
+    }
+
+    // Attach shared memory thread to process
+    shm = (Shared_Memory *)shmat(shmid, NULL, 0);
+    if (shm == (Shared_Memory *)-1)
+    {
+        perror("Error: shmat error");
+        exit(1);
+    }
+
     // open log to append
     log_fp = fopen(LOG_FILENAME, "a");
 
@@ -116,27 +168,119 @@ void start(const char *config_file)
     }
 
     read_config_file(config_file);
+
+    if (pthread_mutexattr_init(&mutex_attr))
+    {
+        perror("Error: pthread_mutexattr_init");
+        exit(1);
+    }
+
+    if (pthread_mutexattr_setpshared(&mutex_attr, PTHREAD_PROCESS_SHARED))
+    {
+        perror("Error: pthread_mutexattr_setpshared");
+        exit(1);
+    }
+
+    if (pthread_mutex_init(&shm->mutex_log, &mutex_attr))
+    {
+        perror("Error: creating a mutex");
+        exit(1);
+    }
+
+    if (pthread_mutex_init(&shm->mutex_shm, &mutex_attr))
+    {
+        perror("Error: creating a mutex");
+        exit(1);
+    }
+
+    servers_pid = malloc(config.AUTH_SERVERS_MAX * sizeof(pid_t));
+
+    if (servers_pid == NULL)
+    {
+        print_log("Error: alocating memory for workers_pid");
+        exit(1);
+    }
+
+    print_log("5G_AUTH_PLATFORM SIMULATOR STARTING");
 }
 
 void finish()
 {
+    print_log("5G_AUTH_PLATFORM SIMULATOR FINISHING");
+
+    if (pthread_mutex_destroy(&shm->mutex_shm))
+    {
+        perror("Error: destroy a mutex mutex_shm");
+    }
+
+    if (pthread_mutex_destroy(&shm->mutex_log))
+    {
+        perror("Error: destroy a mutex mutex_log");
+    }
+
     // close log file
     if (log_fp)
         fclose(log_fp);
+
+    if (shmdt(shm))
+        perror("Error: shmdt error");
+
+    // remove the shared memory
+    if (shmctl(shmid, IPC_RMID, NULL))
+        perror("Error: shmget error");
 }
 
 void *receiver(void *arg)
 {
+    print_log("THREAD RECEIVER CREATED");
     pthread_exit(NULL);
 }
 
 void *sender(void *arg)
 {
+    print_log("THREAD SENDER CREATED");
     pthread_exit(NULL);
+}
+
+void authorization_engine(int server_id)
+{
+    char aux[2048];
+
+    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d CREATED", server_id + 1) < 0)
+    {
+        perror("Error: sprintf failed");
+        exit(1);
+    }
+    print_log(aux);
+
+    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d READY", server_id + 1) < 0)
+    {
+        perror("Error: sprintf failed");
+        exit(1);
+    }
+    print_log(aux);
+    exit(0);
 }
 
 void authorization_request_manager()
 {
+    print_log("PROCESS AUTHORIZATION_REQUEST_MANAGER CREATED");
+
+    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++)
+    {
+        servers_pid[i] = fork();
+
+        if (servers_pid[i] < 0)
+        {
+            perror("Error: creating process Authorization Engine\n");
+            exit(1);
+        }
+        else if (servers_pid[i] == 0)
+        {
+            authorization_engine(i);
+        }
+    }
+
     pthread_t receiver_t, sender_t;
 
     // create the Receiver thread
@@ -165,16 +309,30 @@ void authorization_request_manager()
         exit(1);
     }
 
+    //print_log("5G_AUTH_PLATFORM SIMULATOR WAITING FOR LAST TASKS TO FINISH");
+
+    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++)
+    {
+        if (wait(NULL) == -1)
+        {
+            perror("Error: waiting for a process to finish");
+            exit(1);
+        }
+    }
+
     exit(0);
 }
 
 void monitor_engine()
 {
+    print_log("PROCESS MONITOR_ENGINE CREATED");
     exit(0);
 }
 
 void system_manager()
 {
+    print_log("PROCESS SYSTEM_MANAGER CREATED");
+
     system_manager_pid = getpid();
 
     // create the Authorization Request Manager process
@@ -201,6 +359,15 @@ void system_manager()
     else if (monitor_engine_pid == 0)
     {
         monitor_engine();
+    }
+
+    for (int i = 0; i < 2; i++)
+    {
+        if (wait(NULL) == -1)
+        {
+            perror("Error: waiting for a process to finish");
+            exit(1);
+        }
     }
 }
 
