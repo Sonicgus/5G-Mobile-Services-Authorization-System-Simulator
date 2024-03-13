@@ -52,3 +52,7 @@ Mkfile.old
 dkms.conf
 
 log.txt
+
+5g_auth_platform
+backoffice_user
+mobile_user
