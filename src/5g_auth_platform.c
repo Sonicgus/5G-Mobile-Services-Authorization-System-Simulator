@@ -13,6 +13,97 @@
 FILE *log_fp;
 pid_t system_manager_pid, authorization_request_manager_pid, monitor_engine_pid;
 
+// Struct to store the configuration
+typedef struct
+{
+    int QUEUE_POS, AUTH_SERVERS_MAX, AUTH_PROC_TIME, MAX_VIDEO_WAIT, MAX_OTHERS_WAIT;
+} Config;
+
+Config config;
+
+void print_log(const char *string)
+{
+    time_t t;
+    struct tm *tm_ptr;
+    // get the time
+    t = time(NULL);
+    tm_ptr = localtime(&t);
+
+    if (tm_ptr == NULL)
+    {
+        perror("Error: getting local time struct");
+        exit(1);
+    }
+
+    printf("%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string);
+
+    // print in the log file and screen
+    if (fprintf(log_fp, "%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string) < 0)
+    {
+        perror("Error writing to file");
+        exit(1);
+    }
+
+    if (fflush(log_fp))
+    {
+        perror("fflush");
+        exit(1);
+    }
+    if (fflush(stdout))
+    {
+        perror("fflush");
+        exit(1);
+    }
+}
+
+void read_config_file(const char *config_file)
+{
+    FILE *config_fp;
+
+    // open config file to read
+    config_fp = fopen(config_file, "r");
+
+    if (config_fp == NULL)
+    {
+        perror("Error: opening config file");
+        exit(1);
+    }
+
+    // get config values
+    if (fscanf(config_fp, "%d\n%d\n%d\n%d\n%d", &config.QUEUE_POS, &config.AUTH_SERVERS_MAX, &config.AUTH_PROC_TIME, &config.MAX_VIDEO_WAIT, &config.MAX_OTHERS_WAIT) != 5)
+    {
+        fclose(config_fp);
+        perror("Error: reading config file");
+        exit(1);
+    }
+
+    if (config.QUEUE_POS < 0)
+    {
+        print_log("Error: QUEUE_POS must >=0");
+        exit(1);
+    }
+    if (config.AUTH_SERVERS_MAX < 1)
+    {
+        print_log("Error: AUTH_SERVERS_MAX must >=1");
+        exit(1);
+    }
+    if (config.AUTH_PROC_TIME < 0)
+    {
+        print_log("Error: AUTH_PROC_TIME must >=0");
+        exit(1);
+    }
+    if (config.MAX_VIDEO_WAIT < 1)
+    {
+        print_log("Error: MAX_VIDEO_WAIT must >=1");
+        exit(1);
+    }
+    if (config.MAX_OTHERS_WAIT < 1)
+    {
+        print_log("Error: MAX_OTHERS_WAIT must >=1");
+        exit(1);
+    }
+}
+
 void start(const char *config_file)
 {
     // open log to append
@@ -23,6 +114,8 @@ void start(const char *config_file)
         perror("Error: opening log file");
         exit(1);
     }
+
+    read_config_file(config_file);
 }
 
 void finish()
