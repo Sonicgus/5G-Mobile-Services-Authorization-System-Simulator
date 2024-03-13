@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// #define DEBUG //remove this line to remove debug messages
+
 int main(int argc, char *argv[])
 {
     return 0;
