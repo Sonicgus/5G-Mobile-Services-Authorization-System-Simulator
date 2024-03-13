@@ -5,6 +5,29 @@
 #include <stdlib.h>
 
 // #define DEBUG //remove this line to remove debug messages
+#define LOG_FILENAME "log.txt"
+
+FILE *log_fp;
+
+void start(const char *config_file)
+{
+    // open log to append
+    log_fp = fopen(LOG_FILENAME, "a");
+
+    if (log_fp == NULL)
+    {
+        perror("Error: opening log file");
+        exit(1);
+    }
+
+}
+
+void finish()
+{
+    // close log file
+    if (log_fp)
+        fclose(log_fp);
+}
 
 int main(int argc, char *argv[])
 {
@@ -15,5 +38,9 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    return 0;
+    start(argv[1]);
+
+    finish();
+
+    exit(0);
 }
