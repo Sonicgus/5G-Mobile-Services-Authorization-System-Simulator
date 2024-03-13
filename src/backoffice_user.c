@@ -2,6 +2,7 @@
 // João Maria Pereira Carvalho de Picado Santos 2022213725
 
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(int argc, char *argv[])
 {
