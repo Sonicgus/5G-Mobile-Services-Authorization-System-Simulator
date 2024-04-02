@@ -81,24 +81,33 @@ int read_config_file(const char *config_file) {
 }
 
 int init(const char *config_file) {
-    // create shared memory
+    debug("Creating shared memory");
     shmid = shmget(IPC_PRIVATE, sizeof(Shared_Memory) + config.MOBILE_USERS * sizeof(Mobile_user) + sizeof(Server) * config.AUTH_SERVERS_MAX, IPC_CREAT | 0666);
     if (shmid == -1) {
         perror("Error: shmget error");
         exit(1);
     }
 
-    // Attach shared memory thread to process
+    debug("Attaching shared memory");
     shm = (Shared_Memory *)shmat(shmid, NULL, 0);
     if (shm == (Shared_Memory *)-1) {
         perror("Error: shmat error");
         return -1;
     }
 
+    // initialize shared memory
     shm->users = (Mobile_user *)((char *)(shm + 1));
     shm->servers = (Server *)((char *)(shm->users) + config.MOBILE_USERS * sizeof(Mobile_user));
 
+    shm->video_data = 0;
+    shm->music_data = 0;
+    shm->social_data = 0;
+    shm->video_auth_reqs = 0;
+    shm->music_auth_reqs = 0;
+    shm->social_auth_reqs = 0;
+
     // open log to append
+    debug("Opening log file");
     log_fp = fopen(LOG_FILENAME, "a");
 
     if (log_fp == NULL) {
@@ -106,9 +115,11 @@ int init(const char *config_file) {
         return -1;
     }
 
+    debug("Reading config file");
     if (read_config_file(config_file) == -1)
         return -1;
 
+    debug("initializing mutexes");
     if (pthread_mutexattr_init(&mutex_attr)) {
         perror("Error: pthread_mutexattr_init");
         return -1;
@@ -129,6 +140,7 @@ int init(const char *config_file) {
         return -1;
     }
 
+    debug("allocating memory for servers_pid");
     servers_pid = malloc(config.AUTH_SERVERS_MAX * sizeof(pid_t));
 
     if (servers_pid == NULL) {
@@ -140,36 +152,41 @@ int init(const char *config_file) {
 }
 
 void cleanup() {
+    debug("Cleaning up");
+
+    debug("freeing servers_pid memory");
     if (servers_pid)
         free(servers_pid);
 
-    if (pthread_mutex_destroy(&shm->mutex_shm)) {
+    debug("destroying mutexes");
+    if (pthread_mutex_destroy(&shm->mutex_shm))
         perror("Error: destroy a mutex mutex_shm");
-    }
 
-    if (pthread_mutex_destroy(&shm->mutex_log)) {
+    if (pthread_mutex_destroy(&shm->mutex_log))
         perror("Error: destroy a mutex mutex_log");
-    }
 
-    // close log file
+    debug("closing log file");
     if (log_fp)
         fclose(log_fp);
 
+    debug("detaching shared memory");
     if (shmdt(shm))
         perror("Error: shmdt error");
 
-    // remove the shared memory
+    debug("removing shared memory");
     if (shmctl(shmid, IPC_RMID, NULL))
         perror("Error: shmget error");
 }
 
 void *receiver(void *arg) {
     print_log("THREAD RECEIVER CREATED");
+    debug("thread receiver closing");
     pthread_exit(NULL);
 }
 
 void *sender(void *arg) {
     print_log("THREAD SENDER CREATED");
+    debug("thread sender closing");
     pthread_exit(NULL);
 }
 
@@ -216,6 +233,7 @@ void authorization_request_manager() {
 
     pthread_t receiver_t, sender_t;
 
+    debug("Creating receiver and sender threads");
     // create the Receiver thread
     if (pthread_create(&receiver_t, NULL, receiver, NULL)) {
         perror("Error: Creating receiver thread");
@@ -231,6 +249,7 @@ void authorization_request_manager() {
             perror("Error: waiting for receiver thread to finish");
     }
 
+    debug("Waiting for Authorization Engine processes to finish");
     for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
         if (wait(NULL) == -1) {
             perror("Error: waiting for a process to finish");
@@ -243,6 +262,7 @@ void authorization_request_manager() {
 
 void monitor_engine() {
     print_log("PROCESS MONITOR_ENGINE CREATED");
+    debug("monitor engine closing");
     exit(0);
 }
 
@@ -252,6 +272,7 @@ void system_manager() {
 
     system_manager_pid = getpid();
 
+    debug("Creating Authorization Request Manager and Monitor Engine processes");
     // create the Authorization Request Manager process
     authorization_request_manager_pid = fork();
 
@@ -270,6 +291,7 @@ void system_manager() {
     } else if (monitor_engine_pid == 0) {
         monitor_engine();
     } else {
+        debug("Waiting for Authorization Request Manager and Monitor Engine processes to finish");
         if (wait(NULL) == -1)
             perror("Error: waiting for a process to finish");
     }
