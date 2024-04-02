@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // #define DEBUG //remove this line to remove debug messages
 
@@ -14,8 +15,12 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         printf("> 1#");
-        fgets(input, sizeof(input), stdin);
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            perror("Error: reading from stdin");
+            exit(1);
+        }
         input[strcspn(input, "\n")] = '\0';
     }
+
     exit(0);
 }

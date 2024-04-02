@@ -22,16 +22,19 @@ int main(int argc, char *argv[]) {
     }
 
     // check if the parameters are numbers
-    for (int i = 1; i < 7; i++) {
-        for (int j = 0; j < strlen(argv[i]); j++) {
+    for (int i = 1; i < 7; i++)
+        for (int j = 0; j < strlen(argv[i]); j++)
             if (!isdigit(argv[i][j])) {
                 printf("Error: invalid paramter %d, must be a number\n", i);
                 exit(1);
             }
-        }
-    }
 
-    int plafond = atoi(argv[1]), n_pedidos = atoi(argv[2]), intervalo_video = atoi(argv[3]), intervalo_musica = atoi(argv[4]), intervalo_social = atoi(argv[5]), dados = atoi(argv[6]);
+    int plafond = atoi(argv[1]),
+        n_pedidos = atoi(argv[2]),
+        intervalo_video = atoi(argv[3]),
+        intervalo_musica = atoi(argv[4]),
+        intervalo_social = atoi(argv[5]),
+        dados = atoi(argv[6]);
 
     pid = getpid();
     printf("Mobile user pid: %d\n", pid);
