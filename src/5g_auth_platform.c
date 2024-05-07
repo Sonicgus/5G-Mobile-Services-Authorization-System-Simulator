@@ -106,6 +106,8 @@ int init(const char *config_file) {
     shm->music_auth_reqs = 0;
     shm->social_auth_reqs = 0;
 
+    shm->num_servers = config.AUTH_SERVERS_MAX;
+
     // open log to append
     debug("Opening log file");
     log_fp = fopen(LOG_FILENAME, "a");
@@ -139,6 +141,21 @@ int init(const char *config_file) {
         perror("Error: creating a mutex");
         return -1;
     }
+    // initialize the condition variable cond atributte
+    if (pthread_condattr_init(&cond_attr)) {
+        perror("Error: pthread_condattr_init");
+        return -1;
+    }
+    if (pthread_condattr_setpshared(&cond_attr, PTHREAD_PROCESS_SHARED)) {
+        perror("Error: pthread_condattr_setpshared");
+        return -1;
+    }
+
+    // initialize the condition variable cond
+    if (pthread_cond_init(&shm->cond_sender, &cond_attr)) {
+        perror("Error: pthread_cond_init");
+        return -1;
+    }
 
     debug("allocating memory for servers_pid");
     servers_pid = malloc(config.AUTH_SERVERS_MAX * sizeof(pid_t));
@@ -148,11 +165,32 @@ int init(const char *config_file) {
         return -1;
     }
 
+    // message queue initialization for the communication between the monitor engine and the authorization request manager
+
+    debug("Creating message queue");
+    key = ftok(".", 'A');
+
+    if (key == -1) {
+        perror("Error: ftok");
+        return -1;
+    }
+
+    msgid = msgget(key, IPC_CREAT | 0666);
+
+    if (msgid == -1) {
+        perror("Error: msgget");
+        return -1;
+    }
+
     return 0;
 }
 
 void cleanup() {
     debug("Cleaning up");
+
+    if (msgctl(msgid, IPC_RMID, NULL) == -1) {
+        perror("msgctl");
+    }
 
     debug("freeing servers_pid memory");
     if (servers_pid)
@@ -180,12 +218,274 @@ void cleanup() {
 
 void *receiver(void *arg) {
     print_log("THREAD RECEIVER CREATED");
+
+    // open the user pipe and back pipe
+    int user_pipe_fd, back_pipe_fd;
+
+    if ((user_pipe_fd = open(USER_PIPE, O_RDONLY | O_NONBLOCK)) < 0) {
+        perror("Error opening USER_PIPE");
+        pthread_exit(NULL);
+    }
+
+    if ((back_pipe_fd = open(BACK_PIPE, O_RDONLY | O_NONBLOCK)) < 0) {
+        perror("Error opening BACK_PIPE");
+        close(user_pipe_fd);
+        pthread_exit(NULL);
+    }
+
+    while (1) {
+        // now we want to read from the pipes, so we need to use select
+
+        Task tarefa;
+        bzero(&tarefa, sizeof(Task));
+
+        fd_set readset;
+
+        FD_ZERO(&readset);
+        FD_SET(user_pipe_fd, &readset);
+        FD_SET(back_pipe_fd, &readset);
+
+        if (select(back_pipe_fd + 1, &readset, NULL, NULL, NULL) == -1) {
+            perror("Erro em select");
+        } else {
+            if (FD_ISSET(back_pipe_fd, &readset)) {
+                char buffer[2048];
+                int n = read(back_pipe_fd, buffer, sizeof(buffer));
+
+                if (n < 0) {
+                    perror("Error reading from USER_PIPE");
+                    break;
+                }
+                print_log("Received a task");
+
+                buffer[n] = '\0';
+
+                char *token = strtok(buffer, "#");
+                tarefa.id = atoi(token);
+
+                token = strtok(NULL, "#");
+
+                tarefa.type = 0;
+                tarefa.arrival_time = time(NULL);
+
+                if (strcmp(token, "data_stats") == 0) {
+                    // print data stats
+                    tarefa.data = 0;
+                    // add task to the queue
+                    pthread_mutex_lock(&mutex_others_queue);
+                    if (others_queue_size == 0) {
+                        print_log("Others queue full, Task Descartada");
+                        pthread_mutex_unlock(&mutex_others_queue);
+                        continue;
+                    }
+
+                    others_queue_size--;
+                    tarefa.arrival_time = time(NULL);
+                    // add task to the queue
+                    add_task_to_others_queue(tarefa);
+                    pthread_mutex_unlock(&mutex_others_queue);
+                    pthread_cond_signal(&shm->cond_sender);
+                } else if (strcmp(token, "reset") == 0) {
+                    // reset stats
+                    tarefa.data = 1;
+                    // add task to the queue
+                    pthread_mutex_lock(&mutex_others_queue);
+                    if (others_queue_size == 0) {
+                        print_log("Others queue full, Task Descartada");
+                        pthread_mutex_unlock(&mutex_others_queue);
+                        continue;
+                    }
+
+                    others_queue_size--;
+                    tarefa.arrival_time = time(NULL);
+                    // add task to the queue
+                    add_task_to_others_queue(tarefa);
+                    pthread_mutex_unlock(&mutex_others_queue);
+                    pthread_cond_signal(&shm->cond_sender);
+                } else {
+                    print_log("Error: invalid command");
+                }
+            }
+
+            // check if there is data to read in the user pipe
+            if (FD_ISSET(user_pipe_fd, &readset)) {
+                // read from the user pipe
+                char buffer[2048];
+                int n = read(user_pipe_fd, buffer, sizeof(buffer));
+
+                if (n < 0) {
+                    perror("Error reading from USER_PIPE");
+                    break;
+                }
+                print_log("Received a task");
+
+                buffer[n] = '\0';
+
+                // parse the command
+                char *token = strtok(buffer, "#");
+
+                tarefa.id = atoi(token);
+
+                token = strtok(NULL, "#");
+
+                if (strcmp(token, "MUSIC") == 0) {
+                    // video data
+                    token = strtok(NULL, "#");
+                    tarefa.type = 1;
+                    tarefa.data = atoi(token);
+                } else if (strcmp(token, "SOCIAL") == 0) {
+                    // music data
+                    token = strtok(NULL, "#");
+                    tarefa.type = 2;
+                    tarefa.data = atoi(token);
+                } else if (strcmp(token, "VIDEO") == 0) {
+                    // social data
+                    token = strtok(NULL, "#");
+                    tarefa.type = 3;
+                    tarefa.data = atoi(token);
+
+                    // add task to the queue
+                    pthread_mutex_lock(&mutex_video_queue);
+                    if (video_queue_size == 0) {
+                        print_log("Video queue full, Task Descartada");
+                        pthread_mutex_unlock(&mutex_video_queue);
+                        continue;
+                    }
+
+                    video_queue_size--;
+                    tarefa.arrival_time = time(NULL);
+                    add_task_to_video_queue(tarefa);
+                    pthread_mutex_unlock(&mutex_video_queue);
+                    pthread_cond_signal(&shm->cond_sender);
+                    continue;
+                } else {
+                    // set plafond for a mobile user
+                    tarefa.type = 4;
+                    tarefa.data = atoi(token);
+                }
+
+                // add task to the queue
+                pthread_mutex_lock(&mutex_others_queue);
+                if (others_queue_size == 0) {
+                    print_log("Others queue full, Task Descartada");
+                    pthread_mutex_unlock(&mutex_others_queue);
+                    continue;
+                }
+
+                others_queue_size--;
+                tarefa.arrival_time = time(NULL);
+                add_task_to_others_queue(tarefa);
+                pthread_mutex_unlock(&mutex_others_queue);
+                pthread_cond_signal(&shm->cond_sender);
+            }
+        }
+    }
     debug("thread receiver closing");
     pthread_exit(NULL);
 }
 
+void add_task_to_video_queue(Task tarefa) {
+    Node *new_node = (Node *)malloc(sizeof(Node));
+    if (new_node == NULL) {
+        perror("Error: malloc");
+        return;
+    }
+
+    new_node->task = tarefa;
+    new_node->next = NULL;
+
+    if (video_queue == NULL) {
+        video_queue = new_node;
+    } else {
+        Node *current = video_queue;
+        while (current->next != NULL)
+            current = current->next;
+
+        current->next = new_node;
+    }
+}
+
+void add_task_to_others_queue(Task tarefa) {
+    Node *new_node = (Node *)malloc(sizeof(Node));
+    if (new_node == NULL) {
+        perror("Error: malloc");
+        return;
+    }
+
+    new_node->task = tarefa;
+    new_node->next = NULL;
+
+    if (others_queue == NULL) {
+        others_queue = new_node;
+    } else {
+        Node *current = others_queue;
+        while (current->next != NULL)
+            current = current->next;
+
+        current->next = new_node;
+    }
+}
+
+int get_free_server() {
+    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
+        if (shm->servers[i].state == 1) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
 void *sender(void *arg) {
     print_log("THREAD SENDER CREATED");
+    while (1) {
+        // check if there is a task in the video queue to send
+        Node *current;
+
+        pthread_mutex_lock(&mutex_video_queue);
+        while (1) {
+            if (video_queue != NULL) {
+                current = video_queue;
+                video_queue = video_queue->next;
+                video_queue_size++;
+                pthread_mutex_unlock(&mutex_video_queue);
+                break;
+            }
+            pthread_mutex_unlock(&mutex_video_queue);
+
+            pthread_mutex_lock(&mutex_others_queue);
+            if (others_queue != NULL) {
+                current = others_queue;
+                others_queue = others_queue->next;
+                others_queue_size++;
+                pthread_mutex_unlock(&mutex_others_queue);
+                break;
+            }
+            pthread_mutex_unlock(&mutex_others_queue);
+
+            pthread_cond_wait(&shm->cond_sender, &mutex_video_queue);
+        }
+        print_log("choosing a server to send the task");
+
+        while (1) {  // check if there are servers available
+            pthread_mutex_lock(&shm->mutex_shm);
+            int i = get_free_server();
+
+            if (i == -1) {
+                pthread_mutex_unlock(&shm->mutex_shm);
+                pthread_cond_wait(&shm->cond_sender, &shm->mutex_shm);
+            } else {
+                // send the task to the server
+                write(shm->servers[i].fd[1], (void *)&current->task, sizeof(Task));
+                free(current);
+                shm->servers[i].state = 2;
+                pthread_mutex_unlock(&shm->mutex_shm);
+                print_log("Task sent to a server");
+                break;
+            }
+        }
+    }
+
     debug("thread sender closing");
     pthread_exit(NULL);
 }
@@ -193,18 +493,87 @@ void *sender(void *arg) {
 void authorization_engine(int server_id) {
     char aux[512];
 
-    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d CREATED", server_id) < 0) {
+    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d CREATED", server_id + 1) < 0) {
         perror("Error: sprintf failed");
         exit(1);
     }
     print_log(aux);
 
-    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d READY", server_id) < 0) {
+    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d READY", server_id + 1) < 0) {
         perror("Error: sprintf failed");
         exit(1);
     }
     print_log(aux);
 
+    // infinite loop to process requests
+    // recive via unnamed pipe
+    Task tarefa;
+
+    while (1) {
+        pthread_mutex_lock(&shm->mutex_shm);
+        shm->servers[server_id].state = 1;
+        pthread_mutex_unlock(&shm->mutex_shm);
+
+        // signal the sender
+        pthread_cond_signal(&shm->cond_sender);
+
+        read(shm->servers[server_id].fd[0], (void *)&tarefa, sizeof(Task));
+
+        print_log("Received  a task crg");
+
+        usleep(config.AUTH_PROC_TIME * 1000);
+
+        pthread_mutex_lock(&shm->mutex_shm);
+        if (tarefa.type == 0) {
+            if (tarefa.data == 0) {  // send via msg queue
+                Message msg;
+                msg.mtype = 1;
+                sprintf(msg.message, "Service\tTotal Data\tAuth Reqs\nVideo\t%d\t%d\nMusic\t%d\t%d\nSocial\t%d\t%d\n", shm->video_data, shm->video_auth_reqs, shm->music_data, shm->music_auth_reqs, shm->social_data, shm->social_auth_reqs);
+
+                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                    perror("msgsnd");
+                }
+            } else {  // reset stats
+                shm->video_data = 0;
+                shm->music_data = 0;
+                shm->social_data = 0;
+                shm->video_auth_reqs = 0;
+                shm->music_auth_reqs = 0;
+                shm->social_auth_reqs = 0;
+            }
+        } else if (tarefa.type == 1) {  // music data
+            shm->music_data += tarefa.data;
+            shm->music_auth_reqs++;
+            if (tarefa.data > shm->users[tarefa.id].plafond) {
+                shm->users[tarefa.id].plafond = 0;
+            } else {
+                shm->users[tarefa.id].plafond -= tarefa.data;
+            }
+        } else if (tarefa.type == 2) {  // social data
+            shm->social_data += tarefa.data;
+            shm->social_auth_reqs++;
+            if (tarefa.data > shm->users[tarefa.id].plafond) {
+                shm->users[tarefa.id].plafond = 0;
+            } else {
+                shm->users[tarefa.id].plafond -= tarefa.data;
+            }
+        } else if (tarefa.type == 3) {  // video data
+            shm->video_data += tarefa.data;
+            shm->video_auth_reqs++;
+            if (tarefa.data > shm->users[tarefa.id].plafond) {
+                shm->users[tarefa.id].plafond = 0;
+            } else {
+                shm->users[tarefa.id].plafond -= tarefa.data;
+            }
+        } else if (tarefa.type == 4) {  // set plafond
+            shm->users[tarefa.id].plafond = tarefa.data;
+            shm->users[tarefa.id].plafond_initial = tarefa.data;
+        }
+        pthread_mutex_unlock(&shm->mutex_shm);
+        print_log("Task processed");
+    }
+
+    debug("authorization engine closing");
     exit(0);
 }
 
@@ -212,6 +581,12 @@ void authorization_request_manager() {
     print_log("PROCESS AUTHORIZATION_REQUEST_MANAGER CREATED");
 
     for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
+        // create unnamed pipes
+        if (pipe(shm->servers[i].fd) == -1) {
+            perror("Error: creating pipe");
+            exit(1);
+        }
+
         servers_pid[i] = fork();
         if (servers_pid[i] < 0) {
             perror("Error: creating process Authorization Engine\n");
@@ -220,18 +595,23 @@ void authorization_request_manager() {
                     perror("Error: waiting for a process to finish");
             exit(1);
         } else if (servers_pid[i] == 0) {
-            authorization_engine(i + 1);
+            authorization_engine(i);
         }
     }
 
-    Node *video_queue, *others_queue;
-    int video_queue_size = config.QUEUE_POS;
-    int others_queue_size = config.QUEUE_POS;
+    video_queue_size = config.QUEUE_POS;
+    others_queue_size = config.QUEUE_POS;
 
-    pthread_mutex_t mutex_video_queue = PTHREAD_MUTEX_INITIALIZER,
-                    mutex_others_queue = PTHREAD_MUTEX_INITIALIZER;
+    // create named pipes
+    if ((mkfifo(USER_PIPE, O_CREAT | O_EXCL | 0666) < 0) && (errno != EEXIST)) {
+        perror("Cannot create USER_PIPE: ");
+        exit(1);
+    }
 
-    pthread_t receiver_t, sender_t;
+    if ((mkfifo(BACK_PIPE, O_CREAT | O_EXCL | 0666) < 0) && (errno != EEXIST)) {
+        perror("Cannot create BACK_PIPE: ");
+        exit(1);
+    }
 
     debug("Creating receiver and sender threads");
     // create the Receiver thread
@@ -255,6 +635,14 @@ void authorization_request_manager() {
             perror("Error: waiting for a process to finish");
             exit(1);
         }
+    }
+
+    if (unlink(USER_PIPE)) {
+        perror("Error: unlinking USER_PIPE");
+    }
+
+    if (unlink(BACK_PIPE)) {
+        perror("Error: unlinking BACK_PIPE");
     }
 
     exit(0);
