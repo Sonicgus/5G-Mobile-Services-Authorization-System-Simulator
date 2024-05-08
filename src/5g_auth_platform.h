@@ -24,6 +24,8 @@ typedef struct
     int plafond;
     int plafond_initial;
     int id_mobile;
+
+    int needs_check;
 } Mobile_user;
 
 typedef struct
@@ -36,7 +38,7 @@ typedef struct
 typedef struct
 {
     pthread_mutex_t mutex_shm, mutex_log;
-    pthread_cond_t cond_sender;
+    pthread_cond_t cond_sender, cond_monitor_engine;
 
     // stats
     int video_data,

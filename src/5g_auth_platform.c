@@ -156,6 +156,10 @@ int init(const char *config_file) {
         perror("Error: pthread_cond_init");
         return -1;
     }
+    if (pthread_cond_init(&shm->cond_monitor_engine, &cond_attr)) {
+        perror("Error: pthread_cond_init");
+        return -1;
+    }
 
     debug("allocating memory for servers_pid");
     servers_pid = malloc(config.AUTH_SERVERS_MAX * sizeof(pid_t));
@@ -195,6 +199,13 @@ void cleanup() {
     debug("freeing servers_pid memory");
     if (servers_pid)
         free(servers_pid);
+
+    debug("destroying condition variables");
+    if (pthread_cond_destroy(&shm->cond_sender))
+        perror("Error: destroy a condition variable cond_sender");
+
+    if (pthread_cond_destroy(&shm->cond_monitor_engine))
+        perror("Error: destroy a condition variable cond_monitor_engine");
 
     debug("destroying mutexes");
     if (pthread_mutex_destroy(&shm->mutex_shm))
@@ -437,6 +448,7 @@ int get_free_server() {
 }
 
 void *sender(void *arg) {
+    char aux[512];
     print_log("THREAD SENDER CREATED");
     while (1) {
         // check if there is a task in the video queue to send
@@ -467,8 +479,9 @@ void *sender(void *arg) {
         }
         print_log("choosing a server to send the task");
 
+        pthread_mutex_lock(&shm->mutex_shm);
         while (1) {  // check if there are servers available
-            pthread_mutex_lock(&shm->mutex_shm);
+
             int i = get_free_server();
 
             if (i == -1) {
@@ -477,10 +490,18 @@ void *sender(void *arg) {
             } else {
                 // send the task to the server
                 write(shm->servers[i].fd[1], (void *)&current->task, sizeof(Task));
+                if (sprintf(aux, "SENDER: %s AUTHORIZATION REQUEST (ID = %d) SENT FOR PROCESSING ON AUTH ENGINE %d", current->task.type == 1 ? "MUSIC" : current->task.type == 2 ? "SOCIAL"
+                                                                                                                                                     : current->task.type == 3   ? "VIDEO"
+                                                                                                                                                                                 : "OTHERS",
+                            current->task.id, i + 1) < 0) {
+                    perror("Error: sprintf failed");
+                    exit(1);
+                }
+                print_log(aux);
                 free(current);
                 shm->servers[i].state = 2;
                 pthread_mutex_unlock(&shm->mutex_shm);
-                print_log("Task sent to a server");
+
                 break;
             }
         }
@@ -492,12 +513,6 @@ void *sender(void *arg) {
 
 void authorization_engine(int server_id) {
     char aux[512];
-
-    if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d CREATED", server_id + 1) < 0) {
-        perror("Error: sprintf failed");
-        exit(1);
-    }
-    print_log(aux);
 
     if (sprintf(aux, "PROCESS AUTHORIZATION_ENGINE %d READY", server_id + 1) < 0) {
         perror("Error: sprintf failed");
@@ -527,12 +542,14 @@ void authorization_engine(int server_id) {
         if (tarefa.type == 0) {
             if (tarefa.data == 0) {  // send via msg queue
                 Message msg;
-                msg.mtype = 1;
+                msg.mtype = tarefa.id;
                 sprintf(msg.message, "Service\tTotal Data\tAuth Reqs\nVideo\t%d\t%d\nMusic\t%d\t%d\nSocial\t%d\t%d\n", shm->video_data, shm->video_auth_reqs, shm->music_data, shm->music_auth_reqs, shm->social_data, shm->social_auth_reqs);
 
-                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                if (msgsnd(msgid, &msg, sizeof(msg), 0) == -1) {
                     perror("msgsnd");
                 }
+                print_log(msg.message);
+
             } else {  // reset stats
                 shm->video_data = 0;
                 shm->music_data = 0;
@@ -569,8 +586,15 @@ void authorization_engine(int server_id) {
             shm->users[tarefa.id].plafond = tarefa.data;
             shm->users[tarefa.id].plafond_initial = tarefa.data;
         }
+        if (sprintf(aux, "AUTHORIZATION_ENGINE %d: %s AUTHORIZATION REQUEST (ID = %d) PROCESSING COMPLETED", server_id + 1, tarefa.type == 1 ? "MUSIC" : tarefa.type == 2 ? "SOCIAL"
+                                                                                                                                                     : tarefa.type == 3   ? "VIDEO"
+                                                                                                                                                                          : "OTHERS",
+                    tarefa.id) < 0) {
+            perror("Error: sprintf failed");
+            exit(1);
+        }
+        print_log(aux);
         pthread_mutex_unlock(&shm->mutex_shm);
-        print_log("Task processed");
     }
 
     debug("authorization engine closing");
@@ -648,8 +672,74 @@ void authorization_request_manager() {
     exit(0);
 }
 
+void *trintasecs() {
+    while (1) {
+        sleep(30);
+        pthread_mutex_lock(&shm->mutex_shm);
+        // send stats
+        Message msg;
+        msg.mtype = 1;
+        sprintf(msg.message, "Service\tTotal Data\tAuth Reqs\nVideo\t%d\t%d\nMusic\t%d\t%d\nSocial\t%d\t%d\n", shm->video_data, shm->video_auth_reqs, shm->music_data, shm->music_auth_reqs, shm->social_data, shm->social_auth_reqs);
+
+        pthread_mutex_unlock(&shm->mutex_shm);
+    }
+
+    pthread_exit(NULL);
+}
+
 void monitor_engine() {
     print_log("PROCESS MONITOR_ENGINE CREATED");
+
+    // create thread to  each 30 seconds send data_stats to backoffice
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, trintasecs, NULL)) {
+        perror("Error: creating trintasecs thread");
+    }
+
+    while (1) {
+        char aux[512];
+        pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
+        for (int i = 0; i < config.MOBILE_USERS; i++) {
+            if (shm->users[i].needs_check <= 0) continue;
+            shm->users[i].needs_check = 1;
+
+            if (shm->users[i].plafond == 0) {
+                // send alert
+                Message msg;
+                msg.mtype = shm->users[i].id_mobile;
+                sprintf(msg.message, "ALERT: Plafond de dados atingiu 100%% para o Mobile User %d", i + 1);
+
+                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                    perror("msgsnd");
+                }
+                sprintf(aux, "ALERT 100%% (USER %d) TRIGGERED", i + 1);
+                print_log(aux);
+            } else if (shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
+                // send alert
+                Message msg;
+                msg.mtype = shm->users[i].id_mobile;
+                sprintf(msg.message, "ALERT: Plafond de dados atingiu 90%% para o Mobile User %d", i + 1);
+
+                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                    perror("msgsnd");
+                }
+                sprintf(aux, "ALERT 90%% (USER %d) TRIGGERED", i + 1);
+                print_log(aux);
+            } else if (shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
+                // send alert
+                Message msg;
+                msg.mtype = shm->users[i].id_mobile;
+                sprintf(msg.message, "ALERT: Plafond de dados atingiu 80%% para o Mobile User %d", i + 1);
+
+                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                    perror("msgsnd");
+                }
+                sprintf(aux, "ALERT 80%% (USER %d) TRIGGERED", i + 1);
+                print_log(aux);
+            }
+        }
+    }
+
     debug("monitor engine closing");
     exit(0);
 }
