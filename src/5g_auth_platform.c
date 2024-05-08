@@ -293,7 +293,7 @@ void *receiver(void *arg) {
                     others_queue_size--;
                     tarefa.arrival_time = time(NULL);
                     // add task to the queue
-                    add_task_to_others_queue(tarefa);
+                    add_task_to_queue(tarefa, &others_queue);
                     pthread_mutex_unlock(&mutex_others_queue);
                     pthread_cond_signal(&shm->cond_sender);
                 } else if (strcmp(token, "reset") == 0) {
@@ -310,7 +310,7 @@ void *receiver(void *arg) {
                     others_queue_size--;
                     tarefa.arrival_time = time(NULL);
                     // add task to the queue
-                    add_task_to_others_queue(tarefa);
+                    add_task_to_queue(tarefa, &others_queue);
                     pthread_mutex_unlock(&mutex_others_queue);
                     pthread_cond_signal(&shm->cond_sender);
                 } else {
@@ -365,7 +365,7 @@ void *receiver(void *arg) {
 
                     video_queue_size--;
                     tarefa.arrival_time = time(NULL);
-                    add_task_to_video_queue(tarefa);
+                    add_task_to_queue(tarefa, &video_queue);
                     pthread_mutex_unlock(&mutex_video_queue);
                     pthread_cond_signal(&shm->cond_sender);
                     continue;
@@ -385,7 +385,7 @@ void *receiver(void *arg) {
 
                 others_queue_size--;
                 tarefa.arrival_time = time(NULL);
-                add_task_to_others_queue(tarefa);
+                add_task_to_queue(tarefa, &others_queue);
                 pthread_mutex_unlock(&mutex_others_queue);
                 pthread_cond_signal(&shm->cond_sender);
             }
@@ -395,7 +395,7 @@ void *receiver(void *arg) {
     pthread_exit(NULL);
 }
 
-void add_task_to_video_queue(Task tarefa) {
+void add_task_to_queue(Task tarefa, Node **queue) {
     Node *new_node = (Node *)malloc(sizeof(Node));
     if (new_node == NULL) {
         perror("Error: malloc");
@@ -405,31 +405,10 @@ void add_task_to_video_queue(Task tarefa) {
     new_node->task = tarefa;
     new_node->next = NULL;
 
-    if (video_queue == NULL) {
-        video_queue = new_node;
+    if (*queue == NULL) {
+        *queue = new_node;
     } else {
-        Node *current = video_queue;
-        while (current->next != NULL)
-            current = current->next;
-
-        current->next = new_node;
-    }
-}
-
-void add_task_to_others_queue(Task tarefa) {
-    Node *new_node = (Node *)malloc(sizeof(Node));
-    if (new_node == NULL) {
-        perror("Error: malloc");
-        return;
-    }
-
-    new_node->task = tarefa;
-    new_node->next = NULL;
-
-    if (others_queue == NULL) {
-        others_queue = new_node;
-    } else {
-        Node *current = others_queue;
+        Node *current = *queue;
         while (current->next != NULL)
             current = current->next;
 

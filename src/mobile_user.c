@@ -14,6 +14,13 @@
 
 #define USER_PIPE "/tmp/USER_PIPE"
 
+// Struct to a message
+typedef struct
+{
+    long mtype;
+    char message[2048];
+} Message;
+
 pid_t pid;
 int pipe_fd;
 
@@ -56,6 +63,45 @@ void *reserve_social_data(void *args) {
         printf("Mobile user %d sent a social request\n", pid);
     }
 
+    pthread_exit(NULL);
+}
+
+void *print_alerts(void *args) {
+    // read from msg queue with mtype 1
+    key_t key;
+    int msgid;
+    Message buf;
+
+    key = ftok(".", 'A');
+    if (key == -1) {
+        perror("ftok");
+        exit(1);
+    }
+
+    msgid = msgget(key, 0666);
+    if (msgid == -1) {
+        perror("msgget");
+        exit(1);
+    }
+
+    while (1) {
+        if (msgrcv(msgid, &buf, sizeof(Message), pid, 0) == -1) {
+            perror("msgrcv");
+            exit(1);
+        }
+        printf("\n%s\n", buf.message);
+
+        char *aux[512];
+
+        sprintf(aux, "ALERT: Plafond de dados atingiu 100%% para o Mobile User %d", pid);
+
+        if (strcmp(buf.message, aux) == 0) {
+            printf("Mobile user %d reached 100%% of data usage\n, Exiting...", pid);
+            exit(0);
+        }
+
+        fflush(stdout);
+    }
     pthread_exit(NULL);
 }
 

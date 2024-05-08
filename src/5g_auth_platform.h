@@ -100,8 +100,7 @@ pthread_mutex_t mutex_video_queue = PTHREAD_MUTEX_INITIALIZER,
 
 pthread_t receiver_t, sender_t;
 
-void add_task_to_video_queue(Task tarefa);
-void add_task_to_others_queue(Task tarefa);
+void add_task_to_queue(Task tarefa, Node **queue);
 
 // Struct to a message
 typedef struct
