@@ -81,7 +81,6 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(input, "data_stats") == 0) {
             if (write(pipe_fd, "1#data_stats", strlen("1#data_stats")) < 0) {
                 perror("Error: writing to pipe");
-                close(pipe_fd);
                 exit(1);
             }
 
@@ -89,7 +88,6 @@ int main(int argc, char *argv[]) {
             // send reset stats via named pipe
             if (write(pipe_fd, "1#reset", strlen("1#reset")) < 0) {
                 perror("Error: writing to pipe");
-                close(pipe_fd);
                 exit(1);
             }
 

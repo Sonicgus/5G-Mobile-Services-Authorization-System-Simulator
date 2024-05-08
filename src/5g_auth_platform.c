@@ -680,7 +680,10 @@ void *trintasecs() {
         Message msg;
         msg.mtype = 1;
         sprintf(msg.message, "Service\tTotal Data\tAuth Reqs\nVideo\t%d\t%d\nMusic\t%d\t%d\nSocial\t%d\t%d\n", shm->video_data, shm->video_auth_reqs, shm->music_data, shm->music_auth_reqs, shm->social_data, shm->social_auth_reqs);
-
+        print_log(msg.message);
+        if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+            perror("msgsnd");
+        }
         pthread_mutex_unlock(&shm->mutex_shm);
     }
 
