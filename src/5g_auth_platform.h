@@ -70,7 +70,7 @@ typedef struct
 typedef struct
 {
     int type,  // 0 - comando / 1 - dados de musica / 2 - dados de social / 3 - dados de video / 4 - set plafond
-        id,
+        id,    // id do cliente
         data;  // if type == 0, data = 0 -> data_stats / data = 1 -> reset else if type == 1 or 2 or 3 or 4, data = dados
 
     long arrival_time;

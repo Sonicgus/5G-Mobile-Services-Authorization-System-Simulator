@@ -270,8 +270,8 @@ void *receiver(void *arg) {
         if (select(back_pipe_fd + 1, &readset, NULL, NULL, NULL) == -1) {
             perror("Erro em select");
         } else {
+            char buffer[2048];
             if (FD_ISSET(back_pipe_fd, &readset)) {
-                char buffer[2048];
                 int n = read(back_pipe_fd, buffer, sizeof(buffer));
 
                 if (n < 0) {
@@ -331,7 +331,6 @@ void *receiver(void *arg) {
             // check if there is data to read in the user pipe
             if (FD_ISSET(user_pipe_fd, &readset)) {
                 // read from the user pipe
-                char buffer[2048];
                 int n = read(user_pipe_fd, buffer, sizeof(buffer));
 
                 if (n < 0) {
@@ -545,9 +544,9 @@ void authorization_engine(int server_id) {
             }
         } else {
             if (tarefa.type == 4) {  // set plafond
-                                     // encontrar um vazio
+                // encontrar um vazio
                 for (int i = 0; i < config.MOBILE_USERS; i++) {
-                    if (shm->users[i].plafond == 0) {
+                    if (shm->users[i].id_mobile == 0) {
                         shm->users[i].plafond = tarefa.data;
                         shm->users[i].plafond_initial = tarefa.data;
                         shm->users[i].id_mobile = tarefa.id;
@@ -555,7 +554,6 @@ void authorization_engine(int server_id) {
                         break;
                     }
                 }
-
             } else {
                 // encontrar o user
                 int i;
@@ -707,7 +705,7 @@ void monitor_engine() {
     while (1) {
         pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
         for (int i = 0; i < config.MOBILE_USERS; i++) {
-            if (shm->users[i].plafond_initial == 0) continue;
+            if (shm->users[i].id_mobile == 0) continue;
 
             if (shm->users[i].checked < 3 && shm->users[i].plafond == 0) {
                 sprintf(msg.message, "ALERT 100%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
@@ -715,6 +713,11 @@ void monitor_engine() {
             } else if (shm->users[i].checked < 2 && shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 2;
+                printf("plafond-%d\n", shm->users[i].plafond);
+                printf("plafond_initial-%d\n", shm->users[i].plafond_initial);
+                printf("checked-%d\n", shm->users[i].checked);
+                printf("iiiiiiii-%d\n", i);
+                fflush(stdout);
             } else if (shm->users[i].checked < 1 && shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 1;
