@@ -551,7 +551,6 @@ void authorization_engine(int server_id) {
                 if (tarefa.type == 1) {  // music data
                     shm->music_data += tarefa.data;
                     shm->music_auth_reqs++;
-
                 } else if (tarefa.type == 2) {  // social data
                     shm->social_data += tarefa.data;
                     shm->social_auth_reqs++;
@@ -559,11 +558,11 @@ void authorization_engine(int server_id) {
                     shm->video_data += tarefa.data;
                     shm->video_auth_reqs++;
                 }
-                if (tarefa.data > shm->users[tarefa.id].plafond) {
+                if (tarefa.data > shm->users[tarefa.id].plafond)
                     shm->users[tarefa.id].plafond = 0;
-                } else {
+                else
                     shm->users[tarefa.id].plafond -= tarefa.data;
-                }
+
                 pthread_cond_signal(&shm->cond_monitor_engine);
             }
         }
@@ -688,13 +687,13 @@ void monitor_engine() {
             if (shm->users[i].plafond_initial == 0) continue;
 
             if (shm->users[i].checked < 3 && shm->users[i].plafond == 0) {
-                sprintf(msg.message, "ALERT 100%% (USER %d) TRIGGERED", i + 1);
+                sprintf(msg.message, "ALERT 100%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 3;
             } else if (shm->users[i].checked < 2 && shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
-                sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", i + 1);
+                sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 2;
             } else if (shm->users[i].checked < 1 && shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
-                sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", i + 1);
+                sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 1;
             } else
                 continue;

@@ -32,10 +32,17 @@ int pipe_fd,
     intervalo_social,
     dados;
 
+pthread_mutex_t n_pedidos_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void *reserve_video_data(void *args) {
-    for (int i = 0; i < n_pedidos; i++) {
+    char buffer[100];
+    while (n_pedidos != 0) {
+        pthread_mutex_lock(&n_pedidos_mutex);
+        n_pedidos--;
+        pthread_mutex_unlock(&n_pedidos_mutex);
+
         sleep(intervalo_video);
-        char buffer[100];
+
         sprintf(buffer, "%d#VIDEO#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
         printf("Mobile user %d sent a video request\n", pid);
@@ -45,8 +52,13 @@ void *reserve_video_data(void *args) {
 }
 
 void *reserve_music_data(void *args) {
-    for (int i = 0; i < n_pedidos; i++) {
+    while (n_pedidos != 0) {
+        pthread_mutex_lock(&n_pedidos_mutex);
+        n_pedidos--;
+        pthread_mutex_unlock(&n_pedidos_mutex);
+
         sleep(intervalo_musica);
+
         char buffer[100];
         sprintf(buffer, "%d#MUSIC#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
@@ -57,8 +69,13 @@ void *reserve_music_data(void *args) {
 }
 
 void *reserve_social_data(void *args) {
-    for (int i = 0; i < n_pedidos; i++) {
+    while (n_pedidos) {
+        pthread_mutex_lock(&n_pedidos_mutex);
+        n_pedidos--;
+        pthread_mutex_unlock(&n_pedidos_mutex);
+
         sleep(intervalo_social);
+
         char buffer[100];
         sprintf(buffer, "%d#SOCIAL#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
