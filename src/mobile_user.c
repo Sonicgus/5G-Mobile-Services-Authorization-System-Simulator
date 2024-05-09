@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -22,9 +24,9 @@ typedef struct
 } Message;
 
 pid_t pid;
-int pipe_fd;
+int pipe_fd,
 
-int n_pedidos,
+    n_pedidos,
     intervalo_video,
     intervalo_musica,
     intervalo_social,
@@ -91,7 +93,7 @@ void *print_alerts(void *args) {
         }
         printf("\n%s\n", buf.message);
 
-        char *aux[512];
+        char aux[512];
 
         sprintf(aux, "ALERT: Plafond de dados atingiu 100%% para o Mobile User %d", pid);
 

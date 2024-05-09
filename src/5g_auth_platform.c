@@ -108,6 +108,17 @@ int init(const char *config_file) {
 
     shm->num_servers = config.AUTH_SERVERS_MAX;
 
+    for (int i = 0; i < config.MOBILE_USERS; i++) {
+        shm->users[i].plafond = 0;
+        shm->users[i].plafond_initial = 0;
+        shm->users[i].id_mobile = 0;
+        shm->users[i].checked = 0;
+    }
+
+    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
+        shm->servers[i].state = 0;
+    }
+
     // open log to append
     debug("Opening log file");
     log_fp = fopen(LOG_FILENAME, "a");
@@ -267,7 +278,6 @@ void *receiver(void *arg) {
                     perror("Error reading from USER_PIPE");
                     break;
                 }
-                print_log("Received a task");
 
                 buffer[n] = '\0';
 
@@ -328,7 +338,6 @@ void *receiver(void *arg) {
                     perror("Error reading from USER_PIPE");
                     break;
                 }
-                print_log("Received a task");
 
                 buffer[n] = '\0';
 
@@ -456,7 +465,6 @@ void *sender(void *arg) {
 
             pthread_cond_wait(&shm->cond_sender, &mutex_video_queue);
         }
-        print_log("choosing a server to send the task");
 
         pthread_mutex_lock(&shm->mutex_shm);
         while (1) {  // check if there are servers available
@@ -513,8 +521,6 @@ void authorization_engine(int server_id) {
 
         read(shm->servers[server_id].fd[0], (void *)&tarefa, sizeof(Task));
 
-        print_log("Received  a task crg");
-
         usleep(config.AUTH_PROC_TIME * 1000);
 
         pthread_mutex_lock(&shm->mutex_shm);
@@ -537,34 +543,31 @@ void authorization_engine(int server_id) {
                 shm->music_auth_reqs = 0;
                 shm->social_auth_reqs = 0;
             }
-        } else if (tarefa.type == 1) {  // music data
-            shm->music_data += tarefa.data;
-            shm->music_auth_reqs++;
-            if (tarefa.data > shm->users[tarefa.id].plafond) {
-                shm->users[tarefa.id].plafond = 0;
+        } else {
+            if (tarefa.type == 4) {  // set plafond
+                shm->users[tarefa.id].plafond = tarefa.data;
+                shm->users[tarefa.id].plafond_initial = tarefa.data;
             } else {
-                shm->users[tarefa.id].plafond -= tarefa.data;
+                if (tarefa.type == 1) {  // music data
+                    shm->music_data += tarefa.data;
+                    shm->music_auth_reqs++;
+
+                } else if (tarefa.type == 2) {  // social data
+                    shm->social_data += tarefa.data;
+                    shm->social_auth_reqs++;
+                } else if (tarefa.type == 3) {  // video data
+                    shm->video_data += tarefa.data;
+                    shm->video_auth_reqs++;
+                }
+                if (tarefa.data > shm->users[tarefa.id].plafond) {
+                    shm->users[tarefa.id].plafond = 0;
+                } else {
+                    shm->users[tarefa.id].plafond -= tarefa.data;
+                }
+                pthread_cond_signal(&shm->cond_monitor_engine);
             }
-        } else if (tarefa.type == 2) {  // social data
-            shm->social_data += tarefa.data;
-            shm->social_auth_reqs++;
-            if (tarefa.data > shm->users[tarefa.id].plafond) {
-                shm->users[tarefa.id].plafond = 0;
-            } else {
-                shm->users[tarefa.id].plafond -= tarefa.data;
-            }
-        } else if (tarefa.type == 3) {  // video data
-            shm->video_data += tarefa.data;
-            shm->video_auth_reqs++;
-            if (tarefa.data > shm->users[tarefa.id].plafond) {
-                shm->users[tarefa.id].plafond = 0;
-            } else {
-                shm->users[tarefa.id].plafond -= tarefa.data;
-            }
-        } else if (tarefa.type == 4) {  // set plafond
-            shm->users[tarefa.id].plafond = tarefa.data;
-            shm->users[tarefa.id].plafond_initial = tarefa.data;
         }
+
         if (sprintf(aux, "AUTHORIZATION_ENGINE %d: %s AUTHORIZATION REQUEST (ID = %d) PROCESSING COMPLETED", server_id + 1, tarefa.type == 1 ? "MUSIC" : tarefa.type == 2 ? "SOCIAL"
                                                                                                                                                      : tarefa.type == 3   ? "VIDEO"
                                                                                                                                                                           : "OTHERS",
@@ -678,48 +681,31 @@ void monitor_engine() {
         perror("Error: creating trintasecs thread");
     }
 
+    Message msg;
     while (1) {
-        char aux[512];
         pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
         for (int i = 0; i < config.MOBILE_USERS; i++) {
-            if (shm->users[i].needs_check <= 0) continue;
-            shm->users[i].needs_check = 1;
+            if (shm->users[i].plafond_initial == 0) continue;
 
-            if (shm->users[i].plafond == 0) {
-                // send alert
-                Message msg;
-                msg.mtype = shm->users[i].id_mobile;
-                sprintf(msg.message, "ALERT: Plafond de dados atingiu 100%% para o Mobile User %d", i + 1);
+            if (shm->users[i].checked < 3 && shm->users[i].plafond == 0) {
+                sprintf(msg.message, "ALERT 100%% (USER %d) TRIGGERED", i + 1);
+                shm->users[i].checked = 3;
+            } else if (shm->users[i].checked < 2 && shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
+                sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", i + 1);
+                shm->users[i].checked = 2;
+            } else if (shm->users[i].checked < 1 && shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
+                sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", i + 1);
+                shm->users[i].checked = 1;
+            } else
+                continue;
 
-                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
-                    perror("msgsnd");
-                }
-                sprintf(aux, "ALERT 100%% (USER %d) TRIGGERED", i + 1);
-                print_log(aux);
-            } else if (shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
-                // send alert
-                Message msg;
-                msg.mtype = shm->users[i].id_mobile;
-                sprintf(msg.message, "ALERT: Plafond de dados atingiu 90%% para o Mobile User %d", i + 1);
-
-                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
-                    perror("msgsnd");
-                }
-                sprintf(aux, "ALERT 90%% (USER %d) TRIGGERED", i + 1);
-                print_log(aux);
-            } else if (shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
-                // send alert
-                Message msg;
-                msg.mtype = shm->users[i].id_mobile;
-                sprintf(msg.message, "ALERT: Plafond de dados atingiu 80%% para o Mobile User %d", i + 1);
-
-                if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
-                    perror("msgsnd");
-                }
-                sprintf(aux, "ALERT 80%% (USER %d) TRIGGERED", i + 1);
-                print_log(aux);
+            msg.mtype = shm->users[i].id_mobile;
+            if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
+                perror("msgsnd");
             }
+            print_log(msg.message);
         }
+        pthread_mutex_unlock(&shm->mutex_shm);
     }
 
     debug("monitor engine closing");

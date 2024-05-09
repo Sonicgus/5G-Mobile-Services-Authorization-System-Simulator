@@ -21,17 +21,17 @@
 
 typedef struct
 {
-    int plafond;
-    int plafond_initial;
-    int id_mobile;
+    int plafond,
+        plafond_initial,
+        id_mobile,
 
-    int needs_check;
+        checked;  // 0 - not checked, 1 - checked 80% of plafond, 2 - checked 90% of plafond 3 - checked 100% of plafond
 } Mobile_user;
 
 typedef struct
 {
-    int state;  // 0 - desligado, 1 - a espera de uma tarefa, 2 - a executar uma tarefa
-    int fd[2];
+    int state,  // 0 - desligado, 1 - a espera de uma tarefa, 2 - a executar uma tarefa
+        fd[2];
 } Server;
 
 // Struct to store the shared memory
@@ -43,13 +43,13 @@ typedef struct
     // stats
     int video_data,
         music_data,
-        social_data;
+        social_data,
 
-    int video_auth_reqs,
+        video_auth_reqs,
         music_auth_reqs,
-        social_auth_reqs;
+        social_auth_reqs,
 
-    int num_servers;
+        num_servers;
 
     Mobile_user *users;
     Server *servers;
@@ -69,9 +69,10 @@ typedef struct
 
 typedef struct
 {
-    int type;  // 0 - comando / 1 - dados de musica / 2 - dados de social / 3 - dados de video / 4 - set plafond
-    int id;
-    int data;  // if type == 0, data = 0 -> data_stats / data = 1 -> reset else if type == 1 or 2 or 3 or 4, data = dados
+    int type,  // 0 - comando / 1 - dados de musica / 2 - dados de social / 3 - dados de video / 4 - set plafond
+        id,
+        data;  // if type == 0, data = 0 -> data_stats / data = 1 -> reset else if type == 1 or 2 or 3 or 4, data = dados
+
     long arrival_time;
 } Task;
 
@@ -80,28 +81,6 @@ typedef struct node {
     struct node *next;
 } Node;
 
-Config config;
-int shmid;
-Shared_Memory *shm;
-FILE *log_fp;
-pthread_mutexattr_t mutex_attr;
-pid_t system_manager_pid, authorization_request_manager_pid, monitor_engine_pid;
-pid_t *servers_pid;
-
-key_t key;
-int msgid;
-
-Node *video_queue, *others_queue;
-int video_queue_size;
-int others_queue_size;
-
-pthread_mutex_t mutex_video_queue = PTHREAD_MUTEX_INITIALIZER,
-                mutex_others_queue = PTHREAD_MUTEX_INITIALIZER;
-
-pthread_t receiver_t, sender_t;
-
-void add_task_to_queue(Task tarefa, Node **queue);
-
 // Struct to a message
 typedef struct
 {
@@ -109,6 +88,34 @@ typedef struct
     char message[2048];
 } Message;
 
-pthread_cond_t cond_receiver = PTHREAD_COND_INITIALIZER;
+Config config;
+
+Shared_Memory *shm;
+
+Node *video_queue, *others_queue;
+
+FILE *log_fp;
+
+pid_t system_manager_pid,
+    authorization_request_manager_pid,
+    monitor_engine_pid,
+    *servers_pid;
+
+pthread_mutexattr_t mutex_attr;
+
+pthread_mutex_t mutex_video_queue = PTHREAD_MUTEX_INITIALIZER,
+                mutex_others_queue = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_condattr_t cond_attr;
+
+pthread_t receiver_t, sender_t;
+
+key_t key;
+
+int shmid,
+    msgid,
+
+    video_queue_size,
+    others_queue_size;
+
+void add_task_to_queue(Task tarefa, Node **queue);
