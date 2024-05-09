@@ -7,6 +7,8 @@ void debug(const char *string) {
     // print a debug message
 #ifdef DEBUG
     printf("Debug: (%s)\n", string);
+    if (fflush(stdout))
+        perror("Error: fflush stdout");
 #endif
 }
 
