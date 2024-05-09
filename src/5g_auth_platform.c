@@ -545,25 +545,48 @@ void authorization_engine(int server_id) {
             }
         } else {
             if (tarefa.type == 4) {  // set plafond
-                shm->users[tarefa.id].plafond = tarefa.data;
-                shm->users[tarefa.id].plafond_initial = tarefa.data;
-            } else {
-                if (tarefa.type == 1) {  // music data
-                    shm->music_data += tarefa.data;
-                    shm->music_auth_reqs++;
-                } else if (tarefa.type == 2) {  // social data
-                    shm->social_data += tarefa.data;
-                    shm->social_auth_reqs++;
-                } else if (tarefa.type == 3) {  // video data
-                    shm->video_data += tarefa.data;
-                    shm->video_auth_reqs++;
+                                     // encontrar um vazio
+                for (int i = 0; i < config.MOBILE_USERS; i++) {
+                    if (shm->users[i].plafond == 0) {
+                        shm->users[i].plafond = tarefa.data;
+                        shm->users[i].plafond_initial = tarefa.data;
+                        shm->users[i].id_mobile = tarefa.id;
+                        shm->users[i].checked = 0;
+                        break;
+                    }
                 }
-                if (tarefa.data > shm->users[tarefa.id].plafond)
-                    shm->users[tarefa.id].plafond = 0;
-                else
-                    shm->users[tarefa.id].plafond -= tarefa.data;
 
-                pthread_cond_signal(&shm->cond_monitor_engine);
+            } else {
+                // encontrar o user
+                int i;
+                for (i = 0; i < config.MOBILE_USERS; i++) {
+                    if (shm->users[i].id_mobile == tarefa.id) {
+                        break;
+                    }
+                }
+
+                if (i == config.MOBILE_USERS) {
+                    print_log("Error: User not found");
+                    pthread_mutex_unlock(&shm->mutex_shm);
+                    continue;
+                } else {
+                    if (tarefa.type == 1) {  // music data
+                        shm->music_data += tarefa.data;
+                        shm->music_auth_reqs++;
+                    } else if (tarefa.type == 2) {  // social data
+                        shm->social_data += tarefa.data;
+                        shm->social_auth_reqs++;
+                    } else if (tarefa.type == 3) {  // video data
+                        shm->video_data += tarefa.data;
+                        shm->video_auth_reqs++;
+                    }
+                    if (tarefa.data > shm->users[i].plafond)
+                        shm->users[i].plafond = 0;
+                    else
+                        shm->users[i].plafond -= tarefa.data;
+
+                    pthread_cond_signal(&shm->cond_monitor_engine);
+                }
             }
         }
 
