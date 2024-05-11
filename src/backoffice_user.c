@@ -16,7 +16,7 @@
 // Struct to a message
 typedef struct
 {
-    long mtype;
+    long int mtype;
     char message[2048];
 } Message;
 

@@ -19,7 +19,7 @@
 // Struct to a message
 typedef struct
 {
-    long mtype;
+    long int mtype;
     char message[2048];
 } Message;
 
@@ -46,6 +46,8 @@ void *reserve_video_data(void *args) {
         sprintf(buffer, "%d#VIDEO#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
         printf("Mobile user %d sent a video request\n", pid);
+        if (fflush(stdout) != 0)
+            perror("Error flushing stdout");
     }
 
     pthread_exit(NULL);
@@ -63,6 +65,8 @@ void *reserve_music_data(void *args) {
         sprintf(buffer, "%d#MUSIC#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
         printf("Mobile user %d sent a music request\n", pid);
+        if (fflush(stdout) != 0)
+            perror("Error flushing stdout");
     }
 
     pthread_exit(NULL);
@@ -80,6 +84,8 @@ void *reserve_social_data(void *args) {
         sprintf(buffer, "%d#SOCIAL#%d\n", pid, dados);
         write(pipe_fd, buffer, strlen(buffer));
         printf("Mobile user %d sent a social request\n", pid);
+        if (fflush(stdout) != 0)
+            perror("Error flushing stdout");
     }
 
     pthread_exit(NULL);
@@ -89,7 +95,6 @@ void *print_alerts(void *args) {
     // read from msg queue with mtype 1
     key_t key;
     int msgid;
-    Message buf;
 
     key = ftok(".", 'A');
     if (key == -1) {
@@ -103,23 +108,27 @@ void *print_alerts(void *args) {
         exit(1);
     }
 
+    char aux[512];
+
+    sprintf(aux, "ALERT 100%% (USER %d) TRIGGERED", pid);
+
+    Message buf;
+
     while (1) {
         if (msgrcv(msgid, &buf, sizeof(Message), pid, 0) == -1) {
             perror("msgrcv");
             exit(1);
         }
         printf("\n%s\n", buf.message);
-
-        char aux[512];
-
-        sprintf(aux, "ALERT: Plafond de dados atingiu 100%% para o Mobile User %d", pid);
+        if (fflush(stdout) != 0)
+            perror("Error flushing stdout");
 
         if (strcmp(buf.message, aux) == 0) {
             printf("Mobile user %d reached 100%% of data usage\n, Exiting...", pid);
+            if (fflush(stdout) != 0)
+                perror("Error flushing stdout");
             exit(0);
         }
-
-        fflush(stdout);
     }
     pthread_exit(NULL);
 }
@@ -128,6 +137,8 @@ int main(int argc, char *argv[]) {
     // check if the number of parameters is correct
     if (argc != 7) {
         printf("Error: Wrong parameters, use ./mobile_user {plafond inicial} {número de pedidos de autorização} {intervalo VIDEO} {intervalo MUSIC} {intervalo SOCIAL} {dados a reservar}\n");
+        if (fflush(stdout) != 0)
+            perror("Error flushing stdout");
         exit(1);
     }
 
@@ -136,6 +147,8 @@ int main(int argc, char *argv[]) {
         for (int j = 0; j < strlen(argv[i]); j++)
             if (!isdigit(argv[i][j])) {
                 printf("Error: invalid paramter %d, must be a number\n", i);
+                if (fflush(stdout) != 0)
+                    perror("Error flushing stdout");
                 exit(1);
             }
 
@@ -187,21 +200,25 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // create the 3 threads
-    pthread_t video_thread, music_thread, social_thread;
+    // create the 4 threads
+    pthread_t video_thread, music_thread, social_thread, alerts_thread;
+    if (pthread_create(&alerts_thread, NULL, print_alerts, NULL))
+        perror("Error creating alerts thread");
     if (pthread_create(&video_thread, NULL, reserve_video_data, NULL))
         perror("Error creating video thread");
     if (pthread_create(&music_thread, NULL, reserve_music_data, NULL))
         perror("Error creating music thread");
     if (pthread_create(&social_thread, NULL, reserve_social_data, NULL))
         perror("Error creating social thread");
-
-    if (pthread_join(video_thread, NULL))
-        perror("Error joining video thread");
-    if (pthread_join(music_thread, NULL))
-        perror("Error joining music thread");
     if (pthread_join(social_thread, NULL))
         perror("Error joining social thread");
+    if (pthread_join(music_thread, NULL))
+        perror("Error joining music thread");
+    if (pthread_join(video_thread, NULL))
+        perror("Error joining video thread");
+
+    if (pthread_join(alerts_thread, NULL))
+        perror("Error joining alerts thread");
 
     exit(0);
 }

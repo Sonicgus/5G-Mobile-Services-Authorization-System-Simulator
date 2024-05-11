@@ -690,7 +690,7 @@ void monitor_engine() {
     Message msg;
     while (1) {
         pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
-        print_log("Monitor Engine triggered");
+        print_log("ALERTS acordou");
         for (int i = 0; i < config.MOBILE_USERS; i++) {
             if (shm->users[i].id_mobile == 0) continue;
 
@@ -700,7 +700,6 @@ void monitor_engine() {
             } else if (shm->users[i].checked < 2 && shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 2;
-
             } else if (shm->users[i].checked < 1 && shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 1;
@@ -714,6 +713,7 @@ void monitor_engine() {
             print_log(msg.message);
         }
         pthread_mutex_unlock(&shm->mutex_shm);
+        print_log("ALERTS acabou o for cycle");
     }
 
     debug("monitor engine closing");
