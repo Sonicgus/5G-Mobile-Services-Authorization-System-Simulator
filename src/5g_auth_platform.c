@@ -55,27 +55,27 @@ int read_config_file(const char *config_file) {
     fclose(config_fp);
 
     if (config.MOBILE_USERS < 0) {
-        print_log("Error: MOBILE_USERS must >=0");
+        printf("Error: MOBILE_USERS must >=0");
         return -1;
     }
     if (config.QUEUE_POS < 0) {
-        print_log("Error: QUEUE_POS must >=0");
+        printf("Error: QUEUE_POS must >=0");
         return -1;
     }
     if (config.AUTH_SERVERS_MAX < 1) {
-        print_log("Error: AUTH_SERVERS_MAX must >=1");
+        printf("Error: AUTH_SERVERS_MAX must >=1");
         return -1;
     }
     if (config.AUTH_PROC_TIME < 0) {
-        print_log("Error: AUTH_PROC_TIME must >=0");
+        printf("Error: AUTH_PROC_TIME must >=0");
         return -1;
     }
     if (config.MAX_VIDEO_WAIT < 1) {
-        print_log("Error: MAX_VIDEO_WAIT must >=1");
+        printf("Error: MAX_VIDEO_WAIT must >=1");
         return -1;
     }
     if (config.MAX_OTHERS_WAIT < 1) {
-        print_log("Error: MAX_OTHERS_WAIT must >=1");
+        printf("Error: MAX_OTHERS_WAIT must >=1");
         return -1;
     }
 
@@ -83,8 +83,14 @@ int read_config_file(const char *config_file) {
 }
 
 int init(const char *config_file) {
+    debug("Reading config file");
+    if (read_config_file(config_file) == -1)
+        return -1;
+
+    int size = sizeof(Shared_Memory) + config.MOBILE_USERS * sizeof(Mobile_user) + sizeof(Server) * config.AUTH_SERVERS_MAX;
+
     debug("Creating shared memory");
-    shmid = shmget(IPC_PRIVATE, sizeof(Shared_Memory) + config.MOBILE_USERS * sizeof(Mobile_user) + sizeof(Server) * config.AUTH_SERVERS_MAX, IPC_CREAT | 0666);
+    shmid = shmget(IPC_PRIVATE, size, IPC_CREAT | 0666);
     if (shmid == -1) {
         perror("Error: shmget error");
         exit(1);
@@ -98,28 +104,11 @@ int init(const char *config_file) {
     }
 
     // initialize shared memory
-    shm->users = (Mobile_user *)((char *)(shm + 1));
-    shm->servers = (Server *)((char *)(shm->users) + config.MOBILE_USERS * sizeof(Mobile_user));
 
-    shm->video_data = 0;
-    shm->music_data = 0;
-    shm->social_data = 0;
-    shm->video_auth_reqs = 0;
-    shm->music_auth_reqs = 0;
-    shm->social_auth_reqs = 0;
+    memset(shm, 0, size);
 
-    shm->num_servers = config.AUTH_SERVERS_MAX;
-
-    for (int i = 0; i < config.MOBILE_USERS; i++) {
-        shm->users[i].plafond = 0;
-        shm->users[i].plafond_initial = 0;
-        shm->users[i].id_mobile = 0;
-        shm->users[i].checked = 0;
-    }
-
-    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
-        shm->servers[i].state = 0;
-    }
+    shm->users = (Mobile_user *)(shm + 1);
+    shm->servers = (Server *)((char *)shm->users + sizeof(Mobile_user) * config.MOBILE_USERS);
 
     // open log to append
     debug("Opening log file");
@@ -129,10 +118,6 @@ int init(const char *config_file) {
         perror("Error: opening log file");
         return -1;
     }
-
-    debug("Reading config file");
-    if (read_config_file(config_file) == -1)
-        return -1;
 
     debug("initializing mutexes");
     if (pthread_mutexattr_init(&mutex_attr)) {
@@ -183,7 +168,6 @@ int init(const char *config_file) {
     }
 
     // message queue initialization for the communication between the monitor engine and the authorization request manager
-
     debug("Creating message queue");
     key = ftok(".", 'A');
 
@@ -706,6 +690,7 @@ void monitor_engine() {
     Message msg;
     while (1) {
         pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
+        print_log("Monitor Engine triggered");
         for (int i = 0; i < config.MOBILE_USERS; i++) {
             if (shm->users[i].id_mobile == 0) continue;
 
@@ -715,11 +700,7 @@ void monitor_engine() {
             } else if (shm->users[i].checked < 2 && shm->users[i].plafond <= 0.1 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 90%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 2;
-                printf("plafond-%d\n", shm->users[i].plafond);
-                printf("plafond_initial-%d\n", shm->users[i].plafond_initial);
-                printf("checked-%d\n", shm->users[i].checked);
-                printf("iiiiiiii-%d\n", i);
-                fflush(stdout);
+
             } else if (shm->users[i].checked < 1 && shm->users[i].plafond <= 0.2 * shm->users[i].plafond_initial) {
                 sprintf(msg.message, "ALERT 80%% (USER %d) TRIGGERED", shm->users[i].id_mobile);
                 shm->users[i].checked = 1;
