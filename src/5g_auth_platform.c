@@ -554,22 +554,29 @@ void authorization_engine(int server_id) {
                     pthread_mutex_unlock(&shm->mutex_shm);
                     continue;
                 } else {
-                    if (tarefa.type == 1) {  // music data
-                        shm->music_data += tarefa.data;
-                        shm->music_auth_reqs++;
-                    } else if (tarefa.type == 2) {  // social data
-                        shm->social_data += tarefa.data;
-                        shm->social_auth_reqs++;
-                    } else if (tarefa.type == 3) {  // video data
-                        shm->video_data += tarefa.data;
-                        shm->video_auth_reqs++;
-                    }
-                    if (tarefa.data > shm->users[i].plafond)
-                        shm->users[i].plafond = 0;
-                    else
+                    if (tarefa.data > shm->users[i].plafond) {
+                        if (sprintf(aux, "AUTHORIZATION_ENGINE %d: %s AUTHORIZATION REQUEST REJECTES. INSUFICIENT PLAFOND (ID = %d) ", server_id + 1, tarefa.type == 1 ? "MUSIC" : tarefa.type == 2 ? "SOCIAL"
+                                                                                                                                                                               : tarefa.type == 3   ? "VIDEO"
+                                                                                                                                                                                                    : "OTHERS",
+                                    tarefa.id) < 0) {
+                            perror("Error: sprintf failed");
+                            exit(1);
+                        }
+                        print_log(aux);
+                    } else {
+                        if (tarefa.type == 1) {  // music data
+                            shm->music_data += tarefa.data;
+                            shm->music_auth_reqs++;
+                        } else if (tarefa.type == 2) {  // social data
+                            shm->social_data += tarefa.data;
+                            shm->social_auth_reqs++;
+                        } else if (tarefa.type == 3) {  // video data
+                            shm->video_data += tarefa.data;
+                            shm->video_auth_reqs++;
+                        }
                         shm->users[i].plafond -= tarefa.data;
-
-                    pthread_cond_signal(&shm->cond_monitor_engine);
+                        pthread_cond_signal(&shm->cond_monitor_engine);
+                    }
                 }
             }
         }
@@ -661,6 +668,7 @@ void authorization_request_manager() {
 }
 
 void *trintasecs() {
+    print_log("THREAD TRINTASECS CREATED");
     while (1) {
         sleep(30);
         pthread_mutex_lock(&shm->mutex_shm);
@@ -690,7 +698,6 @@ void monitor_engine() {
     Message msg;
     while (1) {
         pthread_cond_wait(&shm->cond_monitor_engine, &shm->mutex_shm);
-        print_log("ALERTS acordou");
         for (int i = 0; i < config.MOBILE_USERS; i++) {
             if (shm->users[i].id_mobile == 0) continue;
 
@@ -713,7 +720,6 @@ void monitor_engine() {
             print_log(msg.message);
         }
         pthread_mutex_unlock(&shm->mutex_shm);
-        print_log("ALERTS acabou o for cycle");
     }
 
     debug("monitor engine closing");
