@@ -164,7 +164,7 @@ int init(const char *config_file) {
     }
 
     debug("allocating memory for servers_pid");
-    servers_pid = malloc(config.AUTH_SERVERS_MAX * sizeof(pid_t));
+    servers_pid = malloc((config.AUTH_SERVERS_MAX + 1) * sizeof(pid_t));
 
     if (servers_pid == NULL) {
         print_log("Error: alocating memory for workers_pid");
@@ -286,6 +286,7 @@ void *receiver(void *arg) {
                     pthread_mutex_lock(&mutex_others_queue);
                     if (others_queue_size == 0) {
                         print_log("Others queue full, Task Descartada");
+                        create_extra_server_if_needed();
                         pthread_mutex_unlock(&mutex_others_queue);
                         continue;
                     }
@@ -303,6 +304,7 @@ void *receiver(void *arg) {
                     pthread_mutex_lock(&mutex_others_queue);
                     if (others_queue_size == 0) {
                         print_log("Others queue full, Task Descartada");
+                        create_extra_server_if_needed();
                         pthread_mutex_unlock(&mutex_others_queue);
                         continue;
                     }
@@ -357,6 +359,7 @@ void *receiver(void *arg) {
                     pthread_mutex_lock(&mutex_video_queue);
                     if (video_queue_size == 0) {
                         print_log("Video queue full, Task Descartada");
+                        create_extra_server_if_needed();
                         pthread_mutex_unlock(&mutex_video_queue);
                         continue;
                     }
@@ -377,6 +380,7 @@ void *receiver(void *arg) {
                 pthread_mutex_lock(&mutex_others_queue);
                 if (others_queue_size == 0) {
                     print_log("Others queue full, Task Descartada");
+                    create_extra_server_if_needed();
                     pthread_mutex_unlock(&mutex_others_queue);
                     continue;
                 }
@@ -415,7 +419,7 @@ void add_task_to_queue(Task tarefa, Node **queue) {
 }
 
 int get_free_server() {
-    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
+    for (int i = 0; i < shm->num_servers; i++) {
         if (shm->servers[i].state == 1) {
             return i;
         }
@@ -614,6 +618,23 @@ int create_server(int i) {
         authorization_engine(i);
     }
 
+    return 0;
+}
+
+int create_extra_server_if_needed() {
+    print_log("\nChecking if extra server is needed\n");
+    pthread_mutex_lock(&shm->mutex_shm);
+    if (shm->num_servers == config.AUTH_SERVERS_MAX) {
+        print_log("Creating extra server");
+        if (create_server(shm->num_servers) == -1) {
+            print_log("Error: creating server");
+            pthread_mutex_unlock(&shm->mutex_shm);
+            return -1;
+        }
+        shm->num_servers++;
+        pthread_cond_signal(&shm->cond_sender);
+    }
+    pthread_mutex_unlock(&shm->mutex_shm);
     return 0;
 }
 

@@ -119,3 +119,4 @@ int shmid,
     others_queue_size;
 
 void add_task_to_queue(Task tarefa, Node **queue);
+int create_extra_server_if_needed();
