@@ -112,6 +112,8 @@ int init(const char *config_file) {
     shm->users = (Mobile_user *)(shm + 1);
     shm->servers = (Server *)((char *)shm->users + sizeof(Mobile_user) * config.MOBILE_USERS);
 
+    shm->num_servers = config.AUTH_SERVERS_MAX;
+
     // open log to append
     debug("Opening log file");
     log_fp = fopen(LOG_FILENAME, "a");
@@ -598,25 +600,30 @@ void authorization_engine(int server_id) {
     exit(0);
 }
 
+int create_server(int i) {
+    if (pipe(shm->servers[i].fd) == -1) {
+        perror("Error: creating pipe");
+        return -1;
+    }
+
+    servers_pid[i] = fork();
+    if (servers_pid[i] < 0) {
+        perror("Error: creating process Authorization Engine\n");
+        return -1;
+    } else if (servers_pid[i] == 0) {
+        authorization_engine(i);
+    }
+
+    return 0;
+}
+
 void authorization_request_manager() {
     print_log("PROCESS AUTHORIZATION_REQUEST_MANAGER CREATED");
 
     for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
         // create unnamed pipes
-        if (pipe(shm->servers[i].fd) == -1) {
-            perror("Error: creating pipe");
-            exit(1);
-        }
-
-        servers_pid[i] = fork();
-        if (servers_pid[i] < 0) {
-            perror("Error: creating process Authorization Engine\n");
-            for (int j = 0; j < i; j++)
-                if (wait(NULL) == -1)
-                    perror("Error: waiting for a process to finish");
-            exit(1);
-        } else if (servers_pid[i] == 0) {
-            authorization_engine(i);
+        if (create_server(i) == -1) {
+            print_log("Error: creating server");
         }
     }
 
@@ -638,20 +645,19 @@ void authorization_request_manager() {
     // create the Receiver thread
     if (pthread_create(&receiver_t, NULL, receiver, NULL)) {
         perror("Error: Creating receiver thread");
-    } else {
-        // create the Sender thread
-        if (pthread_create(&sender_t, NULL, sender, NULL))
-            perror("Error: Creating sender thread");
-
-        else if (pthread_join(sender_t, NULL))
-            perror("Error: waiting for sender thread to finish");
-
-        if (pthread_join(receiver_t, NULL))
-            perror("Error: waiting for receiver thread to finish");
     }
+    // create the Sender thread
+    if (pthread_create(&sender_t, NULL, sender, NULL))
+        perror("Error: Creating sender thread");
+
+    if (pthread_join(sender_t, NULL))
+        perror("Error: waiting for sender thread to finish");
+
+    if (pthread_join(receiver_t, NULL))
+        perror("Error: waiting for receiver thread to finish");
 
     debug("Waiting for Authorization Engine processes to finish");
-    for (int i = 0; i < config.AUTH_SERVERS_MAX; i++) {
+    for (int i = 0; i < shm->num_servers; i++) {
         if (wait(NULL) == -1) {
             perror("Error: waiting for a process to finish");
             exit(1);
