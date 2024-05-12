@@ -23,15 +23,17 @@ void print_log(const char *string) {
         perror("Error: getting local time struct");
 
     // print in the log file and screen
-    printf("%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string);
-    if (fprintf(log_fp, "%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string) < 0)
-        perror("Error: writing to file");
-
-    if (fflush(log_fp))
-        perror("Error: fflush log_fp");
+    if (fprintf(stdout, "%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string) < 0)
+        perror("Error: writing to stdout");
 
     if (fflush(stdout))
         perror("Error: fflush stdout");
+
+    if (fprintf(log_fp, "%02d:%02d:%02d %s\n", tm_ptr->tm_hour, tm_ptr->tm_min, tm_ptr->tm_sec, string) < 0)
+        perror("Error: writing to log file");
+
+    if (fflush(log_fp))
+        perror("Error: fflush log_fp");
 
     pthread_mutex_unlock(&shm->mutex_log);
 }
@@ -93,7 +95,7 @@ int init(const char *config_file) {
     shmid = shmget(IPC_PRIVATE, size, IPC_CREAT | 0666);
     if (shmid == -1) {
         perror("Error: shmget error");
-        exit(1);
+        return -1;
     }
 
     debug("Attaching shared memory");
@@ -669,12 +671,12 @@ void authorization_request_manager() {
 
 void *trintasecs() {
     print_log("THREAD TRINTASECS CREATED");
+    Message msg;
+    msg.mtype = 1;
     while (1) {
         sleep(30);
         pthread_mutex_lock(&shm->mutex_shm);
         // send stats
-        Message msg;
-        msg.mtype = 1;
         sprintf(msg.message, "Service\tTotal Data\tAuth Reqs\nVideo\t%d\t%d\nMusic\t%d\t%d\nSocial\t%d\t%d\n", shm->video_data, shm->video_auth_reqs, shm->music_data, shm->music_auth_reqs, shm->social_data, shm->social_auth_reqs);
         print_log(msg.message);
         if (msgsnd(msgid, &msg, sizeof(Message), 0) == -1) {
