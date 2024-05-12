@@ -746,7 +746,6 @@ void system_manager() {
 
     if (authorization_request_manager_pid < 0) {
         perror("Error: creating process Authorization Request Manager\n");
-        return;
     } else if (authorization_request_manager_pid == 0) {
         authorization_request_manager();
     }
@@ -758,12 +757,13 @@ void system_manager() {
         perror("Error: creating process Monitor Engine\n");
     } else if (monitor_engine_pid == 0) {
         monitor_engine();
-    } else {
-        debug("Waiting for Authorization Request Manager and Monitor Engine processes to finish");
-        if (wait(NULL) == -1)
-            perror("Error: waiting for a process to finish");
     }
 
+    debug("Waiting for Authorization Request Manager");
+    if (wait(NULL) == -1)
+        perror("Error: waiting for a process to finish");
+
+    debug("Waiting for Monitor Engine");
     if (wait(NULL) == -1)
         perror("Error: waiting for a process to finish");
 
