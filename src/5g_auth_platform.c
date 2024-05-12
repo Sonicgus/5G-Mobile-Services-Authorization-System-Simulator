@@ -294,6 +294,7 @@ void *receiver(void *arg) {
                     others_queue_size--;
                     tarefa.arrival_time = time(NULL);
                     // add task to the queue
+                    remove_old_tasks_others();
                     add_task_to_queue(tarefa, &others_queue);
                     pthread_mutex_unlock(&mutex_others_queue);
                     pthread_cond_signal(&shm->cond_sender);
@@ -312,6 +313,7 @@ void *receiver(void *arg) {
                     others_queue_size--;
                     tarefa.arrival_time = time(NULL);
                     // add task to the queue
+                    remove_old_tasks_others();
                     add_task_to_queue(tarefa, &others_queue);
                     pthread_mutex_unlock(&mutex_others_queue);
                     pthread_cond_signal(&shm->cond_sender);
@@ -366,6 +368,7 @@ void *receiver(void *arg) {
 
                     video_queue_size--;
                     tarefa.arrival_time = time(NULL);
+                    remove_old_tasks_video();
                     add_task_to_queue(tarefa, &video_queue);
                     pthread_mutex_unlock(&mutex_video_queue);
                     pthread_cond_signal(&shm->cond_sender);
@@ -387,6 +390,7 @@ void *receiver(void *arg) {
 
                 others_queue_size--;
                 tarefa.arrival_time = time(NULL);
+                remove_old_tasks_others();
                 add_task_to_queue(tarefa, &others_queue);
                 pthread_mutex_unlock(&mutex_others_queue);
                 pthread_cond_signal(&shm->cond_sender);
@@ -395,6 +399,27 @@ void *receiver(void *arg) {
     }
     debug("thread receiver closing");
     pthread_exit(NULL);
+}
+
+// remove task where MAX_VIDEO_WAIT or MAX_OTHERS_WAIT has passed task arrival time. the first task in the queue is the oldest
+void remove_old_tasks_video() {
+    while (video_queue != NULL && config.MAX_VIDEO_WAIT < time(NULL) - video_queue->task.arrival_time) {
+        Node *current = video_queue;
+        video_queue = video_queue->next;
+        video_queue_size++;
+        free(current);
+        print_log("Task Descartada de video queue");
+    }
+}
+
+void remove_old_tasks_others() {
+    while (others_queue != NULL && config.MAX_OTHERS_WAIT < time(NULL) - others_queue->task.arrival_time) {
+        Node *current = others_queue;
+        others_queue = others_queue->next;
+        others_queue_size++;
+        free(current);
+        print_log("Task Descartada de others queue");
+    }
 }
 
 void add_task_to_queue(Task tarefa, Node **queue) {
@@ -438,6 +463,7 @@ void *sender(void *arg) {
         pthread_mutex_lock(&mutex_video_queue);
         while (1) {
             if (video_queue != NULL) {
+                remove_old_tasks_video();
                 current = video_queue;
                 video_queue = video_queue->next;
                 video_queue_size++;
@@ -448,6 +474,7 @@ void *sender(void *arg) {
 
             pthread_mutex_lock(&mutex_others_queue);
             if (others_queue != NULL) {
+                remove_old_tasks_others();
                 current = others_queue;
                 others_queue = others_queue->next;
                 others_queue_size++;

@@ -120,3 +120,5 @@ int shmid,
 
 void add_task_to_queue(Task tarefa, Node **queue);
 int create_extra_server_if_needed();
+void remove_old_tasks_others();
+void remove_old_tasks_video();
